@@ -1,0 +1,7 @@
+{
+  "label" : "",
+  "tooltip" : "Detect Sand Eel using U-net",
+  "icon" : "",
+  "showDialog" : true,
+  "inputParameters" : [ ]
+}
