@@ -82,18 +82,21 @@ transduceroffset = [_sv['offset'] for _sv in sv[0]['channels']]
 
 
 dat = []
+depth = []
 for i, _freq in enumerate(freq):
-    print(i)
     dum = np.array([_sv['channels'][i]['sv'] for _sv in sv])
+    dat.append(dum)
     # Length of range vector
-    depth = np.arange(dum.shape[1])*sampledistance[i] + 
-len(depth)
-    
-    print(dum.shape)
-    dat = dat.append([dum])
+    depth.append(np.arange(dum.shape[1])*sampledistance[i])
 
-plt.figure()
-plt.imagesc(dat[0])
+# Regridding is needed here
+
+# Plotting
+fig, axs = plt.subplots(nrows=5, figsize=(6, 10))
+for i in [0, 1, 2, 3, 4]:
+    axs[i].imshow(dat[i].transpose(),
+                  extent=[0, 100, 0, 1], aspect='auto')
+plt.tight_layout()
 plt.show()
 
 # This is how you post a school to LSSS:
@@ -102,7 +105,8 @@ school = [{'time': '2021-04-27T14:47:00Z', 'z': 10},
           {'time': '2021-04-27T14:48:00Z', 'z': 20},
           {'time': '2021-04-27T14:48:00Z', 'z': 10}]
 
-school = post('/lsss/module/PelagicEchogramModule/school-boundary', json = school)
+school = post('/lsss/module/PelagicEchogramModule/school-boundary',
+              json = school)
 
 # Set interpretation
 school['id']
