@@ -25,7 +25,8 @@ def preprocess_data(Sv, frequencies, sampledistance, z):
     # TODO check this
     # Move axis to get correct shape: [frequency_channels, range, time]
     Sv = np.moveaxis(Sv, -1, 1)
-    return Sv, frequencies
+    depth = range_vector[range_start_idx:range_start_idx + 256]
+    return Sv, frequencies, depth
 
 
 def select_channels(sv, frequencies):
