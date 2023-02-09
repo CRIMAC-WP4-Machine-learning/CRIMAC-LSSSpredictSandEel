@@ -7,9 +7,12 @@ import requests
 import numpy as np
 import pickle
 from scipy.ndimage import binary_opening, binary_closing, label, generate_binary_structure
-
-from actions.SandEel.data_preprocessing import preprocess_data
-from actions.SandEel.model import load_pretrained_model, get_predictions
+try:
+    from actions.SandEel.data_preprocessing import preprocess_data
+    from actions.SandEel.model import load_pretrained_model, get_predictions
+except:
+    from data_preprocessing import preprocess_data
+    from model import load_pretrained_model, get_predictions
 
 baseUrl = 'http://127.0.0.1:' + os.environ.get('LSSS_SERVER_PORT', '8000')
 input = json.loads(os.environ.get('LSSS_INPUT', '{}'))
@@ -50,7 +53,6 @@ def post(path, params=None, json=None, data=None):
 # Application configuration -> LSSS server -> Server active. Access level (lower left corner) = Administrator mode
 centre = get('/lsss/module/PelagicEchogramModule/current-echogram-point')
 
-
 # If not, just get the centre pixel for the test data:
 if not len(centre) == 0:
     pingNumber = centre['pingNumber']
@@ -63,7 +65,7 @@ else:
 
 # There is a school here:
 pingNumber = int(18450-256/2)
-z = 40
+z = 28
 
     
 #
@@ -100,17 +102,41 @@ sampledistance = [_sv['sampleDistance'] for _sv in sv[0]['channels']]
 transduceroffset = [_sv['offset'] for _sv in sv[0]['channels']]
 
 
-data = []
+rawdata = []
 depth = []
 for i, _freq in enumerate(freq):
     dum = np.array([_sv['channels'][i]['sv'] for _sv in sv])
-    data.append(dum)
+    rawdata.append(dum)
 
     # Length of range vector
     depth.append(np.arange(dum.shape[1])*sampledistance[i])
 
 # Regrid the data, ensure correct dimensions
-data, freq, _depth = preprocess_data(data, freq, sampledistance, z)
+
+# TODO: The regridding seems to select the wrong data. Needs attention.
+data, freq, _depth = preprocess_data(rawdata, freq, sampledistance, z)
+
+# Plot test
+if True:
+    fig, axs = plt.subplots(nrows=len(freq), figsize=(6, 10))
+    for i in range(len(freq)):
+        axs[i].imshow(data[i], aspect='auto')
+        axs[i].set_title(freq[i])
+    plt.tight_layout()
+    plt.show(block=False)
+
+# Post data input to LSSS for testing
+if False:
+    # This post a square school box to vizualize the data that is used by the algortihm
+    # You cannot post a school into another, so this is not compatible with posting
+    # schools from the algorithm.
+    school_test = [{'pingNumber': int(min(pingNumber)), 'z': min(_depth)},
+                   {'pingNumber': int(min(pingNumber)), 'z': max(_depth)},
+                   {'pingNumber': int(max(pingNumber)), 'z': max(_depth)},
+                   {'pingNumber': int(max(pingNumber)), 'z': min(_depth)}]
+    
+    school3 = post('/lsss/module/PelagicEchogramModule/school-boundary',
+                   json = school_test)
 
 # Load pretrained model and get predictions
 model = load_pretrained_model(checkpoint_path)
@@ -125,6 +151,15 @@ kernel = np.ones((5, 5), np.uint8)
 preds_binary = binary_opening(preds_binary, kernel)
 preds_binary = binary_closing(preds_binary, kernel)
 
+# Plot test
+if True:
+    fig, axs = plt.subplots(nrows=len(freq), figsize=(6, 10))
+    for i in range(len(freq)):
+        axs[i].imshow(preds_binary, aspect='auto')
+        axs[i].set_title(freq[i])
+    plt.tight_layout()
+    plt.show(block=True)
+
 # Get the connected components (schools)
 s = generate_binary_structure(2, 2)
 labelled_preds, num_schools = label(preds_binary, structure=s)
@@ -136,36 +171,22 @@ for i in range(1, num_schools+1):
     print(idxs.shape)
     xs = idxs[:, 0]
     ys = idxs[:, 1]
-    bbox = [min(xs), min(ys), max(xs), max(ys)]
-
-
-# TODO POST SCHOOLS TO LSSS
-
-# Plotting
-fig, axs = plt.subplots(nrows=5, figsize=(6, 10))
-for i in range(len(freq)):
-    axs[i].imshow(preds_binary, aspect='auto')
-    axs[i].set_title(freq[i])
-plt.tight_layout()
-plt.show()
-
-# interp depth and ys
-
-pn = np.array(pingNumber)[ys]
-school = []
-for i, _pn in enumerate(pn):
-    school.append({'pingNumber': int(_pn), 'z': _depth[xs[i]]})
-
-# This is how you post a school to LSSS:
-#school_test = [{'pingNumber': 18400, 'z': 30},
-#               {'pingNumber': 18400, 'z': 50},
-#               {'pingNumber': 18500, 'z': 50},
-#               {'pingNumber': 18500, 'z': 30}]
-
-school2 = post('/lsss/module/PelagicEchogramModule/school-boundary',
-              json = school)
-
-# Set interpretation
-school['id']
+    # bbox = [min(xs), min(ys), max(xs), max(ys)]
+    # Get the unique pings
+    pi = np.unique(ys)
+    ma = []
+    mi = []
+    for _ys in np.unique(ys):
+        ma.append(max(xs[ys == _ys]))
+        mi.append(min(xs[ys == _ys]))
+    # Combine max an min values
+    ysi = np.append(pi, pi[::-1])  # Ping
+    xsi = np.append(ma, mi[::-1])  # Depth
+    school = []
+    for i, _ysi in enumerate(ysi):
+        school.append({'pingNumber': int(_ysi+pingNumber[0]), 'z': _depth[xsi[i]]+7.6})
+    # Post school
+    posted_school = post('/lsss/module/PelagicEchogramModule/school-boundary',
+                         json = school)
 
 
