@@ -51,22 +51,21 @@ def post(path, params=None, json=None, data=None):
 # Get the data from LSSS, this works if you click on the echogram first
 # If connection refused error, ensure LSSS scripting server is turned on
 # Application configuration -> LSSS server -> Server active. Access level (lower left corner) = Administrator mode
-centre = get('/lsss/module/PelagicEchogramModule/current-echogram-point')
+zoom = get('/lsss/module/PelagicEchogramModule/zoom')
 
+# /lsss/module/{EchogramModuleId}/current-echogram-point
 # If not, just get the centre pixel for the test data:
-if not len(centre) == 0:
-    pingNumber = centre['pingNumber']
-    #z = centre['z']
-    # centre = {'time': '2021-04-27T14:48:39.039Z', 'pingNumber': 18629,
-    #          'vesselDistance': 699.663, 'z': 33.77759}
+if len(zoom) == 2:
+    npings = zoom[1]['pingNumber']-zoom[0]['pingNumber']
+    datrange = {'pingCount': npings, 'sv': True,
+                'pingNumber': zoom[0]['pingNumber'],
+                'minDepth': zoom[0]['z'], 'maxDepth': zoom[1]['z']}
 else:
-    pingNumber = int(18629-256/2)
-    z = 34
+    raise ValueError('You need to open the echogram and zoom to the region of interest.')
 
 # There is a school here:
-pingNumber = int(18450-256/2)
-z = 28
-
+# pingNumber = int(18450-256/2)
+# z = 28
     
 #
 # Get sv data
@@ -86,35 +85,10 @@ z = 28
 #    minDepth: float. Minimum depth [m]
 #    maxDepth: float. Maximum depth [m]
 
-npings = 256
-datrange = {'pingCount': npings, 'sv': True, 'pingNumber': pingNumber}
 sv = get('/lsss/data/pings', params=datrange)
 
-# Get the frequency vector
-freq = [_sv['frequency'] for _sv in sv[0]['channels']]
-
-# Time vector
-time = [_sv['time'] for _sv in sv]
-pingNumber = [_sv['pingNumber'] for _sv in sv]
-
-# sample disance per channel
-sampledistance = [_sv['sampleDistance'] for _sv in sv[0]['channels']]
-transduceroffset = [_sv['offset'] for _sv in sv[0]['channels']]
-
-
-rawdata = []
-depth = []
-for i, _freq in enumerate(freq):
-    dum = np.array([_sv['channels'][i]['sv'] for _sv in sv])
-    rawdata.append(dum)
-
-    # Length of range vector
-    depth.append(np.arange(dum.shape[1])*sampledistance[i])
-
-# Regrid the data, ensure correct dimensions
-
 # TODO: The regridding seems to select the wrong data. Needs attention.
-data, freq, _depth = preprocess_data(rawdata, freq, sampledistance, z)
+data, freq, _depth, pingNumber = preprocess_data(sv, datrange)
 
 # Plot test
 if True:
@@ -184,7 +158,8 @@ for i in range(1, num_schools+1):
     xsi = np.append(ma, mi[::-1])  # Depth
     school = []
     for i, _ysi in enumerate(ysi):
-        school.append({'pingNumber': int(_ysi+pingNumber[0]), 'z': _depth[xsi[i]]+7.6})
+        school.append({'pingNumber': int(_ysi+pingNumber[0]),
+                       'z': _depth[xsi[i]]})
     # Post school
     posted_school = post('/lsss/module/PelagicEchogramModule/school-boundary',
                          json = school)

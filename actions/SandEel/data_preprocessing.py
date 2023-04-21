@@ -3,30 +3,44 @@ import iris
 from iris.coords import DimCoord
 from iris.analysis import AreaWeighted, Linear
 from iris.cube import Cube
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy import interpolate
 # import torch
 
-def preprocess_data(Sv, frequencies, sampledistance, z):
+def preprocess_data(sv, datrange):
     """
     Get data ready for model
     """
+    
     # Regrid data in range
     new_sample_distance = 0.18
-    Sv = regrid_data(Sv, sampledistance, new_sample_distance=new_sample_distance)
+    Sv, ping_vector, depth_vector, frequencies = regrid_data(
+        sv, datrange, new_sample_distance=new_sample_distance)
 
-    # Crop data in range to get 256 x 256 patch
-    range_vector = np.arange(0, Sv.shape[-1], new_sample_distance)
-    range_start_idx = np.argmin(np.abs(range_vector - z))
-    range_start_idx = np.min([range_start_idx, Sv.shape[-1] - 256])
-    Sv = Sv[:, :, range_start_idx:range_start_idx + 256]
+    # range_vector = np.arange(0, Sv.shape[-1], new_sample_distance)
+    # range_start_idx = np.argmin(np.abs(range_vector - z))
+    # range_start_idx = np.min([range_start_idx, Sv.shape[-1] - 256])
+    
+    #Sv2[:, :, range_start_idx:range_start_idx + 256]
 
     # Select the frequency channels the model is trained on: [18, 38, 120, 200]
     Sv, frequencies = select_channels(Sv, frequencies)
 
+    ########----Ingrid-----#######
+    # Crop data in range to get 256 x 256 patch (HACK!)
+    Sv2 = np.zeros((len(frequencies), 256, 256), dtype=np.float)
+    Sv2[:] = -82 #  np.nan
+    n_p = min([len(ping_vector), 256])
+    n_d = min([len(depth_vector), 256])
+    Sv2[:, 0:n_p, 0:n_d] = Sv[:, 0:n_p, 0:n_d]
+
     # TODO check this
     # Move axis to get correct shape: [frequency_channels, range, time]
-    Sv = np.moveaxis(Sv, -1, 1)
-    depth = range_vector[range_start_idx:range_start_idx + 256]
-    return Sv, frequencies, depth
+    Sv2 = np.moveaxis(Sv2, -1, 1)
+    #######----Ingrid-----#######
+    
+    return Sv2, frequencies, depth_vector, ping_vector
 
 
 def select_channels(sv, frequencies):
@@ -53,42 +67,61 @@ def db_with_limits(data, limit_low=-75, limit_high=0):
     data[data < limit_low] = limit_low
     return data
 
+
 def db(data, eps=1e-10):
     """ Decibel (log) transform """
     return 10 * np.log10(data + eps)
 
-def regrid_data(data, sampledistance, new_sample_distance=0.18):
-    """
-    Placeholder linear regridding algoritm - should probably use something else
-    """
-    horizontal_dim = np.arange(0, data[0].shape[0], 1)
-    horizontal_dim_coord = DimCoord(horizontal_dim, standard_name='projection_x_coordinate', units='s')
 
-    data_regridder = Linear()
-    max_depths = np.array([data_freq.shape[1] * sampledistance[i] for i, data_freq in enumerate(data)])
-    max_length = max(np.ceil(max_depths/new_sample_distance))
+def regrid_data(sv, datrange, new_sample_distance=0.18):
+    # Nearest neighghbour regridding algoritm
 
-    output = np.full((len(data), 256, np.ceil(max_length).astype(int)), np.nan)
-    for i, data_freq in enumerate(data):
-        old_resolution = sampledistance[i]
-        max_depth = max_depths[i]
+    # Get the frequency vector
+    freq = [_sv['frequency'] for _sv in sv[0]['channels']]
+    
+    # Time vector
+    # time = [_sv['time'] for _sv in sv]
+    pingNumber = [_sv['pingNumber'] for _sv in sv]
 
-        old_vertical_dim = np.arange(0, max_depth, old_resolution)
-        old_vertical_dim_coord = DimCoord(old_vertical_dim, standard_name='projection_y_coordinate', units='meter')
-        new_vertical_dim = np.arange(0, max_depth, new_sample_distance)
-        new_vertical_dim_coord = DimCoord(new_vertical_dim, standard_name='projection_y_coordinate', units='meter')
+    # transducer depth is not available, and this is an approximation
+    offset = sv[0]['channels'][len(freq)-1]['sampleDistance']*sv[0][
+        'channels'][len(freq)-1]['offset']
+    tr_depth = datrange['minDepth'] - offset
 
-        old_dims = [(horizontal_dim_coord, 0), (old_vertical_dim_coord, 1)]
-        new_dims = [(horizontal_dim_coord, 0), (new_vertical_dim_coord, 1)]
+    # horizontal_dim = pingNumber
+    new_vertical_dim = np.arange(datrange['minDepth'], datrange['maxDepth'],
+                                 new_sample_distance)
+    
+    # Initialize output (channel, ping, range)
+    output = np.full((len(freq), len(pingNumber), len(new_vertical_dim)),
+                     np.nan)
 
-        data_regridded = regrid(data_freq, old_dims, new_dims, regridder=data_regridder)
+    # Loop over channel
+    for i, data_freq in enumerate(freq):
+        # Loop over ping
+        for j, _sv in enumerate(sv):
+            sv_sub = _sv['channels'][i]['sv']
+            d0 = tr_depth + _sv['channels'][i]['sampleDistance']*_sv[
+                'channels'][i]['offset']
+            # _pingnumber = datrange['pingNumber'] + j
+            sd = _sv['channels'][i]['sampleDistance']
+            old_vertical_dim = np.arange(0, len(sv_sub))*sd + d0
+            
+            len(old_vertical_dim)
+            len(sv_sub)
 
-        # Need a better regridding to ensure data is on the same grid with same length. For now, just select 256 patch
-        output[i, :, :len(new_vertical_dim)] = data_regridded
+            f = interpolate.interp1d(old_vertical_dim, sv_sub,
+                                     axis=0,
+                                     bounds_error=False,
+                                     kind='nearest',
+                                     fill_value=(sv_sub[0], sv_sub[-1]))
+            # use interpolation function returned by `interp1d`
+            ynew = f(new_vertical_dim)
+            output[i, j, :len(new_vertical_dim)] = ynew
 
+    return output, pingNumber, new_vertical_dim, freq
 
-    return output
-
+'''
 def regrid(data, old_dims, new_dims, regridder=None):
     """
     :param data: data to be regridded, 2D or 3D
@@ -112,4 +145,4 @@ def regrid(data, old_dims, new_dims, regridder=None):
         regridder = Linear()
     regrid = orig_cube.regrid(grid_cube, regridder)
     return regrid.data
-
+'''
