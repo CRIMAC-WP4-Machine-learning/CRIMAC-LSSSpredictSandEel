@@ -18,8 +18,11 @@ baseUrl = 'http://127.0.0.1:' + os.environ.get('LSSS_SERVER_PORT', '8000')
 input = json.loads(os.environ.get('LSSS_INPUT', '{}'))
 
 # Path to pre-trained model
-#checkpoint_path = 'C:\\Users\\utseth\\Documents\\Projects\\COGMAR\\Data\\model\\paper_v2_heave_2.pt'
-checkpoint_path = '/mnt/c/DATAscratch/crimac-scratch/modelweights/paper_v2_heave_2.pt'
+checkpoint_path_all = [
+    'C:\\Users\\utseth\\Documents\\Projects\\COGMAR\\Data\\model\\paper_v2_heave_2.pt',
+    '/mnt/c/DATAscratch/crimac-scratch/modelweights/paper_v2_heave_2.pt',
+    './paper_v2_heave_2.pt', './actions/SandEel/paper_v2_heave_2.pt']
+checkpoint_path = [_path for _path in checkpoint_path_all if os.path.isfile(_path)][0]
 
 
 def get(path, params=None):
